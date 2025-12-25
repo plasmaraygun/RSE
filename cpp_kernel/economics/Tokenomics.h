@@ -514,6 +514,7 @@ struct InferenceJob {
     uint64_t submitted_epoch;
     
     bool completed;
+    bool finalized = false;
     std::string response;
     uint32_t tokens_generated;
     uint64_t completion_epoch;

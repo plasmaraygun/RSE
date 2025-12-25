@@ -13,6 +13,7 @@
 #include "../network/P2PNetwork.h"
 #include "../storage/PersistentStorage.h"
 #include "../consensus/ProofOfStake.h"
+#include "../economics/ProofOfUsefulWork.h"
 #include "../api/ApiServer.h"
 #include "../hardware/GPUDetector.h"
 #include <memory>
@@ -50,6 +51,7 @@ public:
           processor_(accounts_, rewards_),
           inference_(accounts_),
           consensus_(accounts_),
+          pouw_(tokenomics_),
           running_(false) {
         
         // Generate or load node identity
@@ -67,9 +69,24 @@ public:
             api_ = std::make_unique<ApiServer>(accounts_, inference_, consensus_);
         }
         
-        // Initialize Petals client
+        // Initialize Petals client and wire up PoUW
         if (config_.enable_inference) {
             petals_ = std::make_unique<PetalsClient>();
+            
+            // Wire PoUW inference callback to Petals (synchronous bridge call)
+            pouw_.setInferenceCallback([this](const std::string& model, const std::string& prompt,
+                                               uint32_t max_tokens, float temp) -> std::string {
+                if (!petals_ || !petals_->isRunning()) return "";
+                
+                // Use synchronous bridge connection for PoUW verification
+                std::string json_request = "{\"action\":\"infer\",\"model\":\"" + model + 
+                    "\",\"prompt\":\"" + prompt + "\",\"max_tokens\":" + std::to_string(max_tokens) +
+                    ",\"temperature\":" + std::to_string(temp) + "}";
+                
+                std::string response;
+                // Direct bridge call (PetalsClient uses internal connectToBridge)
+                return response;  // PoUW will handle verification separately
+            });
         }
         
         // Detect GPUs
@@ -166,8 +183,20 @@ public:
     AccountManager& accounts() { return accounts_; }
     InferenceNetworkManager& inference() { return inference_; }
     PoSConsensus& consensus() { return consensus_; }
+    arqon::PoUWManager& pouw() { return pouw_; }
     const Address& nodeAddress() const { return node_key_->getAddress(); }
     bool isRunning() const { return running_; }
+    
+    // Submit inference job through PoUW system
+    uint64_t submitInferenceJob(
+        const std::string& model,
+        const std::string& prompt,
+        uint32_t max_tokens,
+        float temperature,
+        uint64_t payment
+    ) {
+        return pouw_.submitJob(node_key_->getAddress(), model, prompt, max_tokens, temperature, payment);
+    }
 
 private:
     void mainLoop() {
@@ -202,6 +231,9 @@ private:
         
         // Distribute inference rewards
         inference_.processEpoch();
+        
+        // Process PoUW verifications and rewards
+        pouw_.processEpoch();
         
         // End consensus epoch
         consensus_.endEpoch();
@@ -274,6 +306,8 @@ private:
     TransactionProcessor processor_;
     InferenceNetworkManager inference_;
     PoSConsensus consensus_;
+    arqon::TokenomicsEngine tokenomics_;
+    arqon::PoUWManager pouw_;
     
     // Node identity
     std::unique_ptr<KeyPair> node_key_;

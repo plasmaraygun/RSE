@@ -344,6 +344,23 @@ private:
     
 public:
     // ========================================================================
+    // EPOCH PROCESSING
+    // ========================================================================
+    
+    void processEpoch() {
+        // Cleanup expired jobs
+        cleanupExpiredJobs();
+        
+        // Finalize any completed jobs waiting for verification
+        for (auto& job : completed_jobs_) {
+            if (!job.finalized) {
+                finalizeVerification(job.id);
+                job.finalized = true;
+            }
+        }
+    }
+    
+    // ========================================================================
     // CLEANUP
     // ========================================================================
     
