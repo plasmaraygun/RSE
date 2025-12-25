@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RSE Dashboard - Arqon Network</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .gradient-bg { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); }
+        .card-glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .glow { box-shadow: 0 0 20px rgba(99, 102, 241, 0.3); }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen text-white">
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Mock data generators
+        const generateNodes = () => Array.from({ length: 12 }, (_, i) => ({
+            id: `node-${i + 1}`,
+            name: `Node ${i + 1}`,
+            status: ['online', 'serving', 'offline'][Math.floor(Math.random() * 3)],
+            computeUnits: Math.floor(Math.random() * 150) + 10,
+            tflops: (Math.random() * 100 + 20).toFixed(1),
+            vram: [8, 12, 24, 48, 80][Math.floor(Math.random() * 5)],
+            uptime: (95 + Math.random() * 5).toFixed(1),
+            tokensGenerated: Math.floor(Math.random() * 100000),
+            rewards: (Math.random() * 10).toFixed(2),
+            region: ['US-East', 'US-West', 'EU-West', 'Asia'][Math.floor(Math.random() * 4)]
+        }));
+
+        const generateTransactions = () => Array.from({ length: 10 }, (_, i) => ({
+            hash: `0x${Math.random().toString(16).slice(2, 10)}...${Math.random().toString(16).slice(2, 6)}`,
+            from: `0x${Math.random().toString(16).slice(2, 8)}...`,
+            to: `0x${Math.random().toString(16).slice(2, 8)}...`,
+            amount: (Math.random() * 100).toFixed(4),
+            type: ['transfer', 'stake', 'unstake', 'reward'][Math.floor(Math.random() * 4)],
+            time: `${Math.floor(Math.random() * 60)}m ago`
+        }));
+
+        // Icons component
+        const Icon = ({ name, size = 20, className = "" }) => {
+            useEffect(() => {
+                lucide.createIcons();
+            }, []);
+            return <i data-lucide={name} className={className} style={{ width: size, height: size }}></i>;
+        };
+
+        // Status badge
+        const StatusBadge = ({ status }) => {
+            const colors = {
+                online: 'bg-green-500',
+                serving: 'bg-blue-500 pulse',
+                offline: 'bg-red-500',
+                syncing: 'bg-yellow-500'
+            };
+            return (
+                <span className={`inline-block w-2 h-2 rounded-full ${colors[status] || 'bg-gray-500'}`}></span>
+            );
+        };
+
+        // Stat Card
+        const StatCard = ({ title, value, subtitle, icon, trend }) => (
+            <div className="card-glass rounded-xl p-4">
+                <div className="flex justify-between items-start mb-2">
+                    <span className="text-gray-400 text-sm">{title}</span>
+                    <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                        <Icon name={icon} size={16} className="text-indigo-400" />
+                    </div>
+                </div>
+                <div className="text-2xl font-bold">{value}</div>
+                {subtitle && <div className="text-xs text-gray-500 mt-1">{subtitle}</div>}
+                {trend && (
+                    <div className={`text-xs mt-2 ${trend > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {trend > 0 ? '↑' : '↓'} {Math.abs(trend)}% from last epoch
+                    </div>
+                )}
+            </div>
+        );
+
+        // Navigation
+        const Navigation = ({ active, setActive }) => {
+            const tabs = [
+                { id: 'network', label: 'Network', icon: 'globe' },
+                { id: 'wallet', label: 'Wallet', icon: 'wallet' },
+                { id: 'chat', label: 'Inference', icon: 'message-square' },
+                { id: 'explorer', label: 'Explorer', icon: 'search' },
+                { id: 'admin', label: 'Admin', icon: 'settings' }
+            ];
+            
+            return (
+                <nav className="card-glass rounded-xl p-2 flex gap-1">
+                    {tabs.map(tab => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActive(tab.id)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                                active === tab.id 
+                                    ? 'bg-indigo-600 text-white' 
+                                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                            }`}
+                        >
+                            <Icon name={tab.icon} size={18} />
+                            <span className="hidden sm:inline">{tab.label}</span>
+                        </button>
+                    ))}
+                </nav>
+            );
+        };
+
+        // Network Dashboard
+        const NetworkDashboard = () => {
+            const [nodes] = useState(generateNodes());
+            const onlineNodes = nodes.filter(n => n.status !== 'offline').length;
+            const totalCU = nodes.reduce((sum, n) => sum + n.computeUnits, 0);
+            const totalVRAM = nodes.reduce((sum, n) => sum + n.vram, 0);
+            
+            return (
+                <div className="space-y-6">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <StatCard title="Total Nodes" value={nodes.length} subtitle={`${onlineNodes} online`} icon="server" trend={5} />
+                        <StatCard title="Compute Units" value={`${totalCU} CU`} subtitle="Network capacity" icon="cpu" trend={12} />
+                        <StatCard title="Total VRAM" value={`${totalVRAM} GB`} subtitle="Available memory" icon="hard-drive" />
+                        <StatCard title="Avg TPS" value="8.4" subtitle="Tokens per second" icon="zap" trend={-2} />
+                    </div>
+                    
+                    <div className="card-glass rounded-xl p-4">
+                        <h3 className="font-semibold mb-4 flex items-center gap-2">
+                            <Icon name="globe" size={18} />
+                            Node Status
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {nodes.map(node => (
+                                <div key={node.id} className="bg-white/5 rounded-lg p-3 hover:bg-white/10 transition-all">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="font-medium flex items-center gap-2">
+                                            <StatusBadge status={node.status} />
+                                            {node.name}
+                                        </span>
+                                        <span className="text-xs text-gray-500">{node.region}</span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 text-xs">
+                                        <div>
+                                            <div className="text-gray-500">CU</div>
+                                            <div className="font-medium">{node.computeUnits}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-500">VRAM</div>
+                                            <div className="font-medium">{node.vram}GB</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-500">Uptime</div>
+                                            <div className="font-medium">{node.uptime}%</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Wallet Component
+        const WalletDashboard = () => {
+            const [balance] = useState({ arqon: 127.5432, staked: 50.0, pending: 2.341 });
+            const [transactions] = useState(generateTransactions());
+            
+            return (
+                <div className="space-y-6">
+                    <div className="card-glass rounded-xl p-6 glow">
+                        <div className="flex justify-between items-start mb-6">
+                            <div>
+                                <div className="text-gray-400 text-sm mb-1">Total Balance</div>
+                                <div className="text-4xl font-bold">{balance.arqon.toFixed(4)} <span className="text-indigo-400">ARQN</span></div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button className="bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg flex items-center gap-2 transition-all">
+                                    <Icon name="send" size={16} /> Send
+                                </button>
+                                <button className="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg flex items-center gap-2 transition-all">
+                                    <Icon name="download" size={16} /> Receive
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-white/5 rounded-lg p-4">
+                                <div className="text-gray-400 text-sm">Staked</div>
+                                <div className="text-xl font-semibold">{balance.staked} ARQN</div>
+                                <button className="text-xs text-indigo-400 mt-2 hover:underline">Manage Stake →</button>
+                            </div>
+                            <div className="bg-white/5 rounded-lg p-4">
+                                <div className="text-gray-400 text-sm">Pending Rewards</div>
+                                <div className="text-xl font-semibold text-green-400">+{balance.pending} ARQN</div>
+                                <button className="text-xs text-indigo-400 mt-2 hover:underline">Claim →</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="card-glass rounded-xl p-4">
+                        <h3 className="font-semibold mb-4">Recent Transactions</h3>
+                        <div className="space-y-2">
+                            {transactions.map((tx, i) => (
+                                <div key={i} className="flex justify-between items-center p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-all">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                                            tx.type === 'reward' ? 'bg-green-500/20' : 
+                                            tx.type === 'stake' ? 'bg-indigo-500/20' : 'bg-gray-500/20'
+                                        }`}>
+                                            <Icon name={tx.type === 'reward' ? 'gift' : tx.type === 'stake' ? 'lock' : 'arrow-right'} size={14} />
+                                        </div>
+                                        <div>
+                                            <div className="font-medium text-sm capitalize">{tx.type}</div>
+                                            <div className="text-xs text-gray-500 mono">{tx.hash}</div>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className={`font-medium ${tx.type === 'reward' ? 'text-green-400' : ''}`}>
+                                            {tx.type === 'reward' ? '+' : ''}{tx.amount} ARQN
+                                        </div>
+                                        <div className="text-xs text-gray-500">{tx.time}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Chat/Inference Component
+        const InferenceChat = () => {
+            const [messages, setMessages] = useState([
+                { role: 'assistant', content: 'Hello! I\'m running on the Arqon distributed inference network. How can I help you today?' }
+            ]);
+            const [input, setInput] = useState('');
+            const [model, setModel] = useState('llama-3.1-70b');
+            const [isGenerating, setIsGenerating] = useState(false);
+            
+            const handleSend = () => {
+                if (!input.trim()) return;
+                setMessages(prev => [...prev, { role: 'user', content: input }]);
+                setInput('');
+                setIsGenerating(true);
+                
+                // Simulate response
+                setTimeout(() => {
+                    setMessages(prev => [...prev, { 
+                        role: 'assistant', 
+                        content: 'This is a simulated response from the distributed inference network. In production, this would connect to the Petals-integrated RSE inference layer.' 
+                    }]);
+                    setIsGenerating(false);
+                }, 1500);
+            };
+            
+            return (
+                <div className="flex flex-col h-[600px]">
+                    <div className="card-glass rounded-t-xl p-4 flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                                <Icon name="bot" size={20} />
+                            </div>
+                            <div>
+                                <div className="font-semibold">Arqon Inference</div>
+                                <div className="text-xs text-gray-400">Powered by distributed compute</div>
+                            </div>
+                        </div>
+                        <select 
+                            value={model} 
+                            onChange={(e) => setModel(e.target.value)}
+                            className="bg-white/10 rounded-lg px-3 py-2 text-sm outline-none"
+                        >
+                            <option value="llama-3.1-70b">Llama 3.1 70B</option>
+                            <option value="llama-3.1-405b">Llama 3.1 405B</option>
+                            <option value="mixtral-8x22b">Mixtral 8x22B</option>
+                        </select>
+                    </div>
+                    
+                    <div className="flex-1 bg-black/20 p-4 overflow-y-auto space-y-4">
+                        {messages.map((msg, i) => (
+                            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                                    msg.role === 'user' 
+                                        ? 'bg-indigo-600 rounded-br-sm' 
+                                        : 'bg-white/10 rounded-bl-sm'
+                                }`}>
+                                    {msg.content}
+                                </div>
+                            </div>
+                        ))}
+                        {isGenerating && (
+                            <div className="flex justify-start">
+                                <div className="bg-white/10 rounded-2xl rounded-bl-sm px-4 py-3">
+                                    <span className="pulse">Generating...</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    
+                    <div className="card-glass rounded-b-xl p-4">
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                                placeholder="Type your message..."
+                                className="flex-1 bg-white/10 rounded-lg px-4 py-3 outline-none focus:ring-2 ring-indigo-500"
+                            />
+                            <button 
+                                onClick={handleSend}
+                                disabled={isGenerating}
+                                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-6 rounded-lg transition-all"
+                            >
+                                <Icon name="send" size={18} />
+                            </button>
+                        </div>
+                        <div className="flex justify-between mt-2 text-xs text-gray-500">
+                            <span>~0.01 ARQN per 1K tokens</span>
+                            <span>12 nodes serving {model}</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Explorer Component
+        const Explorer = () => {
+            const [transactions] = useState(generateTransactions());
+            const [searchQuery, setSearchQuery] = useState('');
+            
+            return (
+                <div className="space-y-6">
+                    <div className="card-glass rounded-xl p-4">
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search by address, tx hash, or block..."
+                                className="flex-1 bg-white/10 rounded-lg px-4 py-3 outline-none mono text-sm"
+                            />
+                            <button className="bg-indigo-600 hover:bg-indigo-700 px-6 rounded-lg transition-all">
+                                <Icon name="search" size={18} />
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-4">
+                        <StatCard title="Latest Block" value="#1,234,567" icon="box" />
+                        <StatCard title="Total Transactions" value="2.4M" icon="activity" />
+                        <StatCard title="Active Addresses" value="12,456" icon="users" />
+                    </div>
+                    
+                    <div className="card-glass rounded-xl p-4">
+                        <h3 className="font-semibold mb-4">Latest Transactions</h3>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="text-gray-400 text-left">
+                                        <th className="pb-3">Tx Hash</th>
+                                        <th className="pb-3">From</th>
+                                        <th className="pb-3">To</th>
+                                        <th className="pb-3">Amount</th>
+                                        <th className="pb-3">Type</th>
+                                        <th className="pb-3">Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {transactions.map((tx, i) => (
+                                        <tr key={i} className="border-t border-white/5 hover:bg-white/5">
+                                            <td className="py-3 mono text-indigo-400">{tx.hash}</td>
+                                            <td className="py-3 mono">{tx.from}</td>
+                                            <td className="py-3 mono">{tx.to}</td>
+                                            <td className="py-3">{tx.amount} ARQN</td>
+                                            <td className="py-3">
+                                                <span className={`px-2 py-1 rounded text-xs ${
+                                                    tx.type === 'reward' ? 'bg-green-500/20 text-green-400' :
+                                                    tx.type === 'stake' ? 'bg-indigo-500/20 text-indigo-400' :
+                                                    'bg-gray-500/20 text-gray-400'
+                                                }`}>{tx.type}</span>
+                                            </td>
+                                            <td className="py-3 text-gray-500">{tx.time}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Admin Component
+        const AdminPanel = () => {
+            const [nodeConfig, setNodeConfig] = useState({
+                publicName: 'My RSE Node',
+                port: 31330,
+                gpuEnabled: true,
+                model: 'llama-3.1-70b',
+                maxBatchSize: 8
+            });
+            
+            return (
+                <div className="space-y-6">
+                    <div className="grid grid-cols-2 gap-6">
+                        <div className="card-glass rounded-xl p-6">
+                            <h3 className="font-semibold mb-4 flex items-center gap-2">
+                                <Icon name="server" size={18} />
+                                Node Configuration
+                            </h3>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-sm text-gray-400 block mb-1">Node Name</label>
+                                    <input
+                                        type="text"
+                                        value={nodeConfig.publicName}
+                                        onChange={(e) => setNodeConfig({...nodeConfig, publicName: e.target.value})}
+                                        className="w-full bg-white/10 rounded-lg px-4 py-2 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-sm text-gray-400 block mb-1">Port</label>
+                                    <input
+                                        type="number"
+                                        value={nodeConfig.port}
+                                        onChange={(e) => setNodeConfig({...nodeConfig, port: parseInt(e.target.value)})}
+                                        className="w-full bg-white/10 rounded-lg px-4 py-2 outline-none"
+                                    />
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <label className="text-sm">Enable GPU Inference</label>
+                                    <button 
+                                        onClick={() => setNodeConfig({...nodeConfig, gpuEnabled: !nodeConfig.gpuEnabled})}
+                                        className={`w-12 h-6 rounded-full transition-all ${nodeConfig.gpuEnabled ? 'bg-indigo-600' : 'bg-gray-600'}`}
+                                    >
+                                        <div className={`w-5 h-5 bg-white rounded-full transition-all ${nodeConfig.gpuEnabled ? 'translate-x-6' : 'translate-x-0.5'}`}></div>
+                                    </button>
+                                </div>
+                                <button className="w-full bg-indigo-600 hover:bg-indigo-700 py-3 rounded-lg transition-all">
+                                    Save Configuration
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div className="card-glass rounded-xl p-6">
+                            <h3 className="font-semibold mb-4 flex items-center gap-2">
+                                <Icon name="shield" size={18} />
+                                Staking Management
+                            </h3>
+                            <div className="space-y-4">
+                                <div className="bg-white/5 rounded-lg p-4">
+                                    <div className="text-sm text-gray-400">Current Stake</div>
+                                    <div className="text-2xl font-bold">50.0 ARQN</div>
+                                    <div className="text-xs text-green-400 mt-1">✓ Meets GPU node requirement (5 ARQN)</div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button className="bg-green-600 hover:bg-green-700 py-2 rounded-lg transition-all">
+                                        + Add Stake
+                                    </button>
+                                    <button className="bg-red-600/50 hover:bg-red-600 py-2 rounded-lg transition-all">
+                                        - Remove Stake
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <h4 className="font-semibold mt-6 mb-3">Slashing Events</h4>
+                            <div className="text-center text-gray-500 py-4">
+                                <Icon name="check-circle" size={24} className="mx-auto mb-2" />
+                                No slashing events
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="card-glass rounded-xl p-6">
+                        <h3 className="font-semibold mb-4 flex items-center gap-2">
+                            <Icon name="activity" size={18} />
+                            Node Metrics
+                        </h3>
+                        <div className="grid grid-cols-4 gap-4">
+                            <div className="bg-white/5 rounded-lg p-4 text-center">
+                                <div className="text-3xl font-bold text-green-400">99.8%</div>
+                                <div className="text-sm text-gray-400">Uptime</div>
+                            </div>
+                            <div className="bg-white/5 rounded-lg p-4 text-center">
+                                <div className="text-3xl font-bold">88</div>
+                                <div className="text-sm text-gray-400">Compute Units</div>
+                            </div>
+                            <div className="bg-white/5 rounded-lg p-4 text-center">
+                                <div className="text-3xl font-bold">12.4k</div>
+                                <div className="text-sm text-gray-400">Tokens Generated</div>
+                            </div>
+                            <div className="bg-white/5 rounded-lg p-4 text-center">
+                                <div className="text-3xl font-bold text-indigo-400">2.8x</div>
+                                <div className="text-sm text-gray-400">Reward Multiplier</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Main App
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('network');
+            
+            useEffect(() => {
+                lucide.createIcons();
+            }, [activeTab]);
+            
+            const renderContent = () => {
+                switch (activeTab) {
+                    case 'network': return <NetworkDashboard />;
+                    case 'wallet': return <WalletDashboard />;
+                    case 'chat': return <InferenceChat />;
+                    case 'explorer': return <Explorer />;
+                    case 'admin': return <AdminPanel />;
+                    default: return <NetworkDashboard />;
+                }
+            };
+            
+            return (
+                <div className="min-h-screen p-4 md:p-8">
+                    <header className="mb-8">
+                        <div className="flex justify-between items-center mb-6">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-xl">
+                                    R
+                                </div>
+                                <div>
+                                    <h1 className="text-xl font-bold">RSE Dashboard</h1>
+                                    <p className="text-xs text-gray-400">Arqon Network • Epoch 1,247</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <div className="text-right">
+                                    <div className="text-sm text-gray-400">Network Status</div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 bg-green-500 rounded-full pulse"></span>
+                                        <span className="text-green-400 text-sm">Healthy</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <Navigation active={activeTab} setActive={setActiveTab} />
+                    </header>
+                    
+                    <main>
+                        {renderContent()}
+                    </main>
+                    
+                    <footer className="mt-8 text-center text-gray-500 text-sm">
+                        RSE Kernel v1.0 • Arqon Network • {new Date().getFullYear()}
+                    </footer>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

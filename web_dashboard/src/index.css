@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --rse-primary: #00ffff;
+  --rse-secondary: #ff00ff;
+  --rse-bg: #050510;
+}
+
+body {
+  background-color: var(--rse-bg);
+  color: white;
+  margin: 0;
+  overflow: hidden; /* Prevent scroll on 3D view */
+}

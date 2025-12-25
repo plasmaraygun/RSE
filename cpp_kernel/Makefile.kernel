@@ -1,0 +1,104 @@
+# ARQON RSE Kernel Makefile
+# Builds a bootable x86_64 kernel
+
+# Tools
+AS = nasm
+CC = x86_64-elf-gcc
+CXX = x86_64-elf-g++
+LD = x86_64-elf-ld
+
+# If cross-compiler not available, try native with flags
+ifeq ($(shell which $(CC) 2>/dev/null),)
+    CC = gcc
+    CXX = g++
+    LD = ld
+endif
+
+# Flags
+ASFLAGS = -f elf64
+CFLAGS = -ffreestanding -fno-exceptions -fno-rtti -nostdlib -mno-red-zone \
+         -mcmodel=kernel -fno-pic -fno-pie -Wall -Wextra -O2
+CXXFLAGS = $(CFLAGS) -std=c++20 -fno-threadsafe-statics
+LDFLAGS = -n -nostdlib -T boot/linker.ld
+
+# Directories
+BOOT_DIR = boot
+ARCH_DIR = arch/x86_64
+DRIVER_DIR = drivers
+BUILD_DIR = build/kernel
+
+# Source files
+ASM_SOURCES = $(BOOT_DIR)/boot.asm $(ARCH_DIR)/interrupts.asm
+CPP_SOURCES = $(BOOT_DIR)/kernel.cpp
+
+# Object files
+ASM_OBJECTS = $(patsubst %.asm,$(BUILD_DIR)/%.o,$(notdir $(ASM_SOURCES)))
+CPP_OBJECTS = $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(notdir $(CPP_SOURCES)))
+OBJECTS = $(ASM_OBJECTS) $(CPP_OBJECTS)
+
+# Output
+KERNEL = $(BUILD_DIR)/arqon-kernel.elf
+ISO = $(BUILD_DIR)/arqon.iso
+
+.PHONY: all clean iso run
+
+all: $(KERNEL)
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+# Assembly
+$(BUILD_DIR)/boot.o: $(BOOT_DIR)/boot.asm | $(BUILD_DIR)
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(BUILD_DIR)/interrupts.o: $(ARCH_DIR)/interrupts.asm | $(BUILD_DIR)
+	$(AS) $(ASFLAGS) $< -o $@
+
+# C++
+$(BUILD_DIR)/kernel.o: $(BOOT_DIR)/kernel.cpp | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Link
+$(KERNEL): $(OBJECTS)
+	$(LD) $(LDFLAGS) -o $@ $^
+	@echo "Kernel built: $@"
+	@size $@
+
+# Create bootable ISO with GRUB
+iso: $(KERNEL)
+	mkdir -p $(BUILD_DIR)/iso/boot/grub
+	cp $(KERNEL) $(BUILD_DIR)/iso/boot/
+	echo 'set timeout=3' > $(BUILD_DIR)/iso/boot/grub/grub.cfg
+	echo 'set default=0' >> $(BUILD_DIR)/iso/boot/grub/grub.cfg
+	echo '' >> $(BUILD_DIR)/iso/boot/grub/grub.cfg
+	echo 'menuentry "ARQON RSE Kernel" {' >> $(BUILD_DIR)/iso/boot/grub/grub.cfg
+	echo '    multiboot2 /boot/arqon-kernel.elf' >> $(BUILD_DIR)/iso/boot/grub/grub.cfg
+	echo '    boot' >> $(BUILD_DIR)/iso/boot/grub/grub.cfg
+	echo '}' >> $(BUILD_DIR)/iso/boot/grub/grub.cfg
+	grub-mkrescue -o $(ISO) $(BUILD_DIR)/iso 2>/dev/null || \
+	    grub2-mkrescue -o $(ISO) $(BUILD_DIR)/iso 2>/dev/null || \
+	    echo "Warning: grub-mkrescue not found, ISO not created"
+	@echo "ISO created: $(ISO)"
+
+# Run in QEMU
+run: iso
+	qemu-system-x86_64 -cdrom $(ISO) -serial stdio -m 256M
+
+# Run kernel directly (no ISO)
+run-kernel: $(KERNEL)
+	qemu-system-x86_64 -kernel $(KERNEL) -serial stdio -m 256M
+
+# Debug with GDB
+debug: $(KERNEL)
+	qemu-system-x86_64 -kernel $(KERNEL) -serial stdio -m 256M -s -S &
+	gdb $(KERNEL) -ex "target remote localhost:1234"
+
+clean:
+	rm -rf $(BUILD_DIR)
+
+# Print info
+info:
+	@echo "Kernel: $(KERNEL)"
+	@echo "Objects: $(OBJECTS)"
+	@echo "CC: $(CC)"
+	@echo "CXX: $(CXX)"
